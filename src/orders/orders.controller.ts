@@ -11,8 +11,10 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { EmailWebhookDto } from './dto/email-webhook.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../auth/enums/role.enum';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Service Orders')
 @ApiBearerAuth()
@@ -112,5 +114,16 @@ export class OrdersController {
     @Request() req: { user: { role: string; clientId: string | null } },
   ) {
     return this.ordersService.trackOrder(id, req.user);
+  }
+
+  @Public()
+  @Post('webhook/email')
+  @ApiOperation({
+    summary: 'Receive email webhook notification for budget approval/rejection',
+    description:
+      'Public endpoint called by email provider (SendGrid/Mailgun) when client responds to budget email.',
+  })
+  handleEmailWebhook(@Body() dto: EmailWebhookDto) {
+    return this.ordersService.handleEmailWebhook(dto);
   }
 }

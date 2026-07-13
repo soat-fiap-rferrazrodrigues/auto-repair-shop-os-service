@@ -11,6 +11,12 @@ import { OrderStatus } from './enums/order-status.enum';
 import { ServicesService } from '../services/services.service';
 import { PartsService } from '../parts/parts.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
+import {
+  CreateOrderUseCase,
+  UpdateOrderStatusUseCase,
+  ListOrdersUseCase,
+  TrackOrderUseCase,
+} from './use-cases';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -28,6 +34,7 @@ describe('OrdersService', () => {
   const mockOrdersRepository = {
     findAll: jest.fn(),
     findById: jest.fn(),
+    findActiveOrders: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
     save: jest.fn(),
   };
@@ -53,6 +60,10 @@ describe('OrdersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
+        CreateOrderUseCase,
+        UpdateOrderStatusUseCase,
+        ListOrdersUseCase,
+        TrackOrderUseCase,
         { provide: OrdersRepository, useValue: mockOrdersRepository },
         { provide: ServicesService, useValue: mockServicesService },
         { provide: PartsService, useValue: mockPartsService },

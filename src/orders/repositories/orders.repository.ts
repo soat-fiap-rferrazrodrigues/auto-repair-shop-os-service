@@ -32,6 +32,18 @@ export class OrdersRepository {
     return this.repo.find({ relations: ORDER_RELATIONS });
   }
 
+  findActiveOrders(): Promise<ServiceOrder[]> {
+    return this.repo.find({
+      where: [
+        { status: OrderStatus.RECEIVED },
+        { status: OrderStatus.IN_DIAGNOSIS },
+        { status: OrderStatus.AWAITING_APPROVAL },
+        { status: OrderStatus.IN_EXECUTION },
+      ],
+      relations: ORDER_RELATIONS,
+    });
+  }
+
   findById(id: string): Promise<ServiceOrder | null> {
     return this.repo.findOne({ where: { id }, relations: ORDER_RELATIONS });
   }

@@ -9,6 +9,12 @@ import { ServicesModule } from '../services/services.module';
 import { PartsModule } from '../parts/parts.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
 import { OrdersRepository } from './repositories/orders.repository';
+import {
+  CreateOrderUseCase,
+  UpdateOrderStatusUseCase,
+  ListOrdersUseCase,
+  TrackOrderUseCase,
+} from './use-cases';
 
 @Module({
   imports: [
@@ -18,7 +24,14 @@ import { OrdersRepository } from './repositories/orders.repository';
     VehiclesModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository],
+  providers: [
+    OrdersService,
+    OrdersRepository,
+    CreateOrderUseCase,
+    UpdateOrderStatusUseCase,
+    ListOrdersUseCase,
+    TrackOrderUseCase,
+  ],
   exports: [OrdersService, OrdersRepository],
 })
 export class OrdersModule {}
