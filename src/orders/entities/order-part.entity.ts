@@ -1,7 +1,15 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+} from 'typeorm';
 import { ServiceOrder } from './service-order.entity';
 import { Part } from '../../parts/entities/part.entity';
 
+// Items are always loaded by their parent order.
+@Index('IDX_order_parts_order', ['orderId'])
 @Entity('order_parts')
 export class OrderPart {
   @PrimaryGeneratedColumn('uuid')

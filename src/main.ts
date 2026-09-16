@@ -1,10 +1,18 @@
+import { initTracing } from './tracing';
+
+// Must run before Nest and any instrumented library is loaded.
+initTracing();
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { JsonLogger } from './common/logger/json.logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: new JsonLogger(),
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

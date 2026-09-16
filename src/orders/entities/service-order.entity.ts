@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
@@ -12,6 +13,9 @@ import { OrderStatus } from '../enums/order-status.enum';
 import { OrderServiceItem } from './order-service.entity';
 import { OrderPart } from './order-part.entity';
 
+// Supports the dashboard queries that filter by status and order by creation
+// date (daily volume and average execution time per status).
+@Index('IDX_service_orders_status_created', ['status', 'createdAt'])
 @Entity('service_orders')
 export class ServiceOrder {
   @PrimaryGeneratedColumn('uuid')

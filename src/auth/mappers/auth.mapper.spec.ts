@@ -1,4 +1,4 @@
-import { AuthMapper } from './auth.mapper';
+import { AuthMapper, API_TOKEN_ISSUER } from './auth.mapper';
 import { User } from '../entities/user.entity';
 import { Role } from '../enums/role.enum';
 
@@ -17,6 +17,7 @@ describe('AuthMapper', () => {
         email: 'admin@test.com',
         role: Role.ADMIN,
         clientId: 'client-1',
+        iss: API_TOKEN_ISSUER,
       });
     });
 

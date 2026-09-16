@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
@@ -10,6 +11,8 @@ import {
 import { Client } from '../../clients/entities/client.entity';
 import { ServiceOrder } from '../../orders/entities/service-order.entity';
 
+// Vehicles are almost always fetched through their owner.
+@Index('IDX_vehicles_client', ['clientId'])
 @Entity('vehicles')
 export class Vehicle {
   @PrimaryGeneratedColumn('uuid')

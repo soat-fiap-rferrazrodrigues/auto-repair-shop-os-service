@@ -18,6 +18,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     email: string;
     role: string;
     clientId: string | null;
+    cpf?: string | null;
+    iss?: string;
   }) {
     if (!payload.sub) throw new UnauthorizedException();
     return {
@@ -25,6 +27,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: payload.email,
       role: payload.role,
       clientId: payload.clientId ?? null,
+      cpf: payload.cpf ?? null,
+      issuer: payload.iss ?? null,
     };
   }
 }
