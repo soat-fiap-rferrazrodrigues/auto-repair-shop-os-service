@@ -11,6 +11,8 @@ import { OrderStatus } from './enums/order-status.enum';
 import { ServicesService } from '../services/services.service';
 import { PartsService } from '../parts/parts.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
+import { OrderSagaOrchestrator } from './saga/order-saga.orchestrator';
+import { EmailAction } from './dto/email-webhook.dto';
 import {
   CreateOrderUseCase,
   UpdateOrderStatusUseCase,
@@ -56,7 +58,14 @@ describe('OrdersService', () => {
     findOne: jest.fn().mockResolvedValue({ id: 'vehicle-1', plate: 'ABC1D23' }),
   };
 
+  const mockSaga = {
+    start: jest.fn<Promise<void>, [string]>(),
+    handle: jest.fn<Promise<void>, [unknown]>(),
+  };
+
   beforeEach(async () => {
+    mockSaga.start.mockReset().mockResolvedValue(undefined);
+    mockSaga.handle.mockReset().mockResolvedValue(undefined);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -68,6 +77,10 @@ describe('OrdersService', () => {
         { provide: ServicesService, useValue: mockServicesService },
         { provide: PartsService, useValue: mockPartsService },
         { provide: VehiclesService, useValue: mockVehiclesService },
+        {
+          provide: OrderSagaOrchestrator,
+          useValue: mockSaga,
+        },
       ],
     }).compile();
 
@@ -140,10 +153,10 @@ describe('OrdersService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should decrease stock on IN_EXECUTION', async () => {
+    it('never decreases stock locally (execution-service owns it)', async () => {
       const order = {
         ...mockOrder,
-        status: OrderStatus.AWAITING_APPROVAL,
+        status: OrderStatus.AWAITING_PAYMENT,
         parts: [{ partId: 'part-1', quantity: 2 }],
       };
       mockOrdersRepository.findById.mockResolvedValue(order);
@@ -153,7 +166,7 @@ describe('OrdersService', () => {
         status: OrderStatus.IN_EXECUTION,
       });
 
-      expect(mockPartsService.decreaseStock).toHaveBeenCalledWith('part-1', 2);
+      expect(mockPartsService.decreaseStock).not.toHaveBeenCalled();
     });
 
     it('should set finishedAt on FINISHED', async () => {
@@ -186,22 +199,77 @@ describe('OrdersService', () => {
       expect(result.status).toBe(OrderStatus.IN_DIAGNOSIS);
     });
 
-    it('sendBudget → AWAITING_APPROVAL', async () => {
+    it('sendBudget → AWAITING_APPROVAL and starts saga with items', async () => {
+      mockOrdersRepository.findById.mockResolvedValue({
+        ...mockOrder,
+        status: OrderStatus.IN_DIAGNOSIS,
+        totalPrice: '195.90',
+        services: [{ serviceId: 'svc-1', price: '150.00' }],
+        parts: [{ partId: 'part-1', quantity: 1, unitPrice: '45.90' }],
+      });
+      mockOrdersRepository.save.mockImplementation((o) => Promise.resolve(o));
+      const result = await service.sendBudget('order-1');
+      expect(result.status).toBe(OrderStatus.AWAITING_APPROVAL);
+      expect(mockSaga.start).toHaveBeenCalledWith('order-1', {
+        total: 195.9,
+        items: [
+          {
+            kind: 'SERVICE',
+            referenceId: 'svc-1',
+            quantity: 1,
+            unitPrice: 150,
+          },
+          { kind: 'PART', referenceId: 'part-1', quantity: 1, unitPrice: 45.9 },
+        ],
+      });
+    });
+
+    it('sendBudget handles orders without item relations', async () => {
+      mockOrdersRepository.findById.mockResolvedValue({
+        ...mockOrder,
+        status: OrderStatus.IN_DIAGNOSIS,
+        services: undefined,
+        parts: undefined,
+      });
+      mockOrdersRepository.save.mockImplementation((o) => Promise.resolve(o));
+      await service.sendBudget('order-1');
+      expect(mockSaga.start).toHaveBeenCalledWith('order-1', {
+        total: 195.9,
+        items: [],
+      });
+    });
+
+    it('sendBudget survives saga start failure', async () => {
       setupOrder(OrderStatus.IN_DIAGNOSIS);
+      mockSaga.start.mockRejectedValueOnce(new Error('broker down'));
       const result = await service.sendBudget('order-1');
       expect(result.status).toBe(OrderStatus.AWAITING_APPROVAL);
     });
 
-    it('approveBudget → IN_EXECUTION', async () => {
+    it('approveBudget delegates BudgetApproved to the saga', async () => {
       setupOrder(OrderStatus.AWAITING_APPROVAL);
-      const result = await service.approveBudget('order-1');
-      expect(result.status).toBe(OrderStatus.IN_EXECUTION);
+      await service.approveBudget('order-1');
+      expect(mockSaga.handle).toHaveBeenCalledWith({
+        type: 'BudgetApproved',
+        orderId: 'order-1',
+      });
     });
 
-    it('rejectBudget → RECEIVED', async () => {
+    it('rejectBudget delegates BudgetRejected to the saga', async () => {
       setupOrder(OrderStatus.AWAITING_APPROVAL);
-      const result = await service.rejectBudget('order-1');
-      expect(result.status).toBe(OrderStatus.RECEIVED);
+      await service.rejectBudget('order-1');
+      expect(mockSaga.handle).toHaveBeenCalledWith({
+        type: 'BudgetRejected',
+        orderId: 'order-1',
+      });
+    });
+
+    it('approveBudget 404s before touching the saga', async () => {
+      mockOrdersRepository.findById.mockResolvedValue(null);
+      await expect(service.approveBudget('x')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockSaga.handle).not.toHaveBeenCalled();
     });
 
     it('finishExecution → FINISHED', async () => {
@@ -271,6 +339,36 @@ describe('OrdersService', () => {
       await expect(
         service.trackOrder('order-1', { role: 'client', clientId: null }),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('handleEmailWebhook', () => {
+    const webhook = (action: EmailAction) =>
+      service.handleEmailWebhook({ orderId: 'order-1', action, from: 'c@x' });
+
+    it.each([
+      [EmailAction.APPROVE, 'BudgetApproved'],
+      [EmailAction.REJECT, 'BudgetRejected'],
+    ])('%s dispatches %s to the saga', async (action, type) => {
+      mockOrdersRepository.findById.mockResolvedValue({
+        ...mockOrder,
+        status: OrderStatus.AWAITING_APPROVAL,
+      });
+      await webhook(action);
+      expect(mockSaga.handle).toHaveBeenCalledWith({
+        type,
+        orderId: 'order-1',
+      });
+    });
+
+    it('ignores orders not awaiting approval', async () => {
+      mockOrdersRepository.findById.mockResolvedValue({
+        ...mockOrder,
+        status: OrderStatus.RECEIVED,
+      });
+      const result = await webhook(EmailAction.APPROVE);
+      expect(result.status).toBe(OrderStatus.RECEIVED);
+      expect(mockSaga.handle).not.toHaveBeenCalled();
     });
   });
 });

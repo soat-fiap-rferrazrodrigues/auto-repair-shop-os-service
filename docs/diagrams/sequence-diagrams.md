@@ -91,3 +91,51 @@ sequenceDiagram
     end
     API->>DD: Log do resultado da integração
 ```
+
+## Saga orquestrada — Fase 4 (ADR-004)
+
+### Caminho feliz
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OS as os-service (orquestrador)
+    participant SNS as SNS os-commands
+    participant BIL as billing-service
+    participant MP as Mercado Pago
+    participant EXE as execution-service
+
+    OS->>SNS: billing.GenerateBudget {orderId, items, total}
+    SNS->>BIL: (fila billing-commands)
+    BIL-->>OS: BudgetGenerated → OS AWAITING_APPROVAL
+    Note over OS: Cliente aprova (webhook de e-mail)
+    OS->>SNS: billing.CreatePayment
+    SNS->>BIL: (fila billing-commands)
+    BIL->>MP: cria preference (X-Idempotency-Key)
+    MP-->>BIL: webhook pagamento aprovado (HMAC)
+    BIL-->>OS: PaymentConfirmed → OS IN_EXECUTION
+    OS->>SNS: execution.ReserveAndEnqueue {paymentId, parts}
+    SNS->>EXE: (fila execution-commands)
+    EXE->>EXE: TransactWrite (baixa estoque + enfileira)
+    EXE-->>OS: ExecutionQueued
+    Note over EXE: diagnóstico → reparo → finalização
+    EXE-->>OS: ExecutionFinished → OS FINISHED
+```
+
+### Compensação — estoque indisponível
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OS as os-service
+    participant BIL as billing-service
+    participant MP as Mercado Pago
+    participant EXE as execution-service
+
+    OS->>EXE: execution.ReserveAndEnqueue
+    EXE-->>OS: StockUnavailable (transação abortada, nada gravado)
+    OS->>BIL: billing.RefundPayment (compensação)
+    OS->>OS: OS → CANCELLED
+    BIL->>MP: refund
+    BIL->>BIL: pagamento → REFUNDED
+```

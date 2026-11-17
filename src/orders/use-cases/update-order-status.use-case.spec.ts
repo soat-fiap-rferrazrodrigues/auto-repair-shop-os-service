@@ -2,13 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { UpdateOrderStatusUseCase } from './update-order-status.use-case';
 import { OrdersRepository } from '../repositories/orders.repository';
-import { PartsService } from '../../parts/parts.service';
 import { OrderStatus } from '../enums/order-status.enum';
 
 describe('UpdateOrderStatusUseCase', () => {
   let useCase: UpdateOrderStatusUseCase;
   let ordersRepository: OrdersRepository;
-  let partsService: PartsService;
 
   const mockOrder = {
     id: 'order-1',
@@ -22,15 +20,10 @@ describe('UpdateOrderStatusUseCase', () => {
       findById: jest.fn(),
       save: jest.fn().mockImplementation((o) => Promise.resolve(o)),
     } as unknown as OrdersRepository;
-    partsService = {
-      decreaseStock: jest.fn().mockResolvedValue(undefined),
-    } as unknown as PartsService;
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UpdateOrderStatusUseCase,
         { provide: OrdersRepository, useValue: ordersRepository },
-        { provide: PartsService, useValue: partsService },
       ],
     }).compile();
 
@@ -63,20 +56,26 @@ describe('UpdateOrderStatusUseCase', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('should decrease stock on IN_EXECUTION transition', async () => {
-    const awaitingOrder = {
+  it('IN_EXECUTION sets timestamps and never touches stock', async () => {
+    (ordersRepository.findById as jest.Mock).mockResolvedValue({
+      ...mockOrder,
+      status: OrderStatus.AWAITING_PAYMENT,
+    } as any);
+    const result = await useCase.execute('order-1', {
+      status: OrderStatus.IN_EXECUTION,
+    });
+    expect(result.startedAt).toBeInstanceOf(Date);
+    expect(result.approvedAt).toBeInstanceOf(Date);
+  });
+
+  it('rejects skipping payment (AWAITING_APPROVAL → IN_EXECUTION)', async () => {
+    (ordersRepository.findById as jest.Mock).mockResolvedValue({
       ...mockOrder,
       status: OrderStatus.AWAITING_APPROVAL,
-    };
-    (ordersRepository.findById as jest.Mock).mockResolvedValue(
-      awaitingOrder as any,
-    );
-    await useCase.execute('order-1', { status: OrderStatus.IN_EXECUTION });
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(partsService.decreaseStock as jest.Mock).toHaveBeenCalledWith(
-      'part-1',
-      2,
-    );
+    } as any);
+    await expect(
+      useCase.execute('order-1', { status: OrderStatus.IN_EXECUTION }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('should set finishedAt on FINISHED transition', async () => {

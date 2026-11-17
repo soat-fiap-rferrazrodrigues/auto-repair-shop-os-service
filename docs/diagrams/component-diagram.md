@@ -80,3 +80,33 @@ As claims são mantidas compatíveis em `src/auth/mappers/auth.mapper.ts`:
   "iss": "auto-repair-auth-lambda"
 }
 ```
+
+## Fase 4 — Microsserviços
+
+```mermaid
+flowchart LR
+    GW[API Gateway] --> OS[os-service :3000]
+    GW --> BIL[billing-service :3001]
+    GW --> EXE[execution-service :3002]
+    MP[Mercado Pago] -- webhook --> BIL
+
+    OS -- publica --> T1[(SNS os-commands)]
+    T1 -- billing.* --> Q1[[SQS billing-commands]] --> BIL
+    T1 -- execution.* --> Q2[[SQS execution-commands]] --> EXE
+    BIL -- publica --> T2[(SNS billing-events)]
+    EXE -- publica --> T3[(SNS execution-events)]
+    T2 --> Q3[[SQS os-saga-events]]
+    T3 --> Q3
+    Q3 --> OS
+
+    OS --- DB1[(PostgreSQL os)]
+    BIL --- DB2[(PostgreSQL billing)]
+    EXE --- DB3[(DynamoDB execution)]
+
+    Q1 -.-> D1[[DLQ]]
+    Q2 -.-> D2[[DLQ]]
+    Q3 -.-> D3[[DLQ]]
+```
+
+Cada serviço acessa somente o próprio banco. As permissões vêm do IAM via IRSA
+(ADR-005, ADR-006).

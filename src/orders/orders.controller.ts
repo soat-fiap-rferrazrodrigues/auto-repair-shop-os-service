@@ -64,7 +64,7 @@ export class OrdersController {
   @Post(':id/approve-budget')
   @ApiOperation({
     summary:
-      'Client approves budget → status automatically changes to IN_EXECUTION and stock is decremented',
+      'Client approves budget → AWAITING_PAYMENT; billing creates the Mercado Pago payment and execution reserves stock after confirmation',
   })
   approveBudget(@Param('id') id: string) {
     return this.ordersService.approveBudget(id);

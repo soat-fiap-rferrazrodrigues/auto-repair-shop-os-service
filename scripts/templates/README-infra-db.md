@@ -53,7 +53,7 @@ um commit separado e explícito.
 ## Migrations
 
 Este repositório provisiona **apenas a infraestrutura**. O schema é versionado
-em migrations do TypeORM, no repositório `auto-repair-shop-api`, e aplicado
+em migrations do TypeORM, no repositório `auto-repair-os-service`, e aplicado
 pelo pipeline da aplicação antes de cada rollout.
 
 ## Secrets do repositório

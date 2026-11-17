@@ -16,6 +16,9 @@ com API Gateway, autenticação serverless, Kubernetes escalável e observabilid
 - [ADR-001](adr/ADR-001-autenticacao-jwt-hs256.md) — Autenticação JWT HS256 com segredo compartilhado
 - [ADR-002](adr/ADR-002-escalabilidade-hpa.md) — Escalabilidade via Horizontal Pod Autoscaler
 - [ADR-003](adr/ADR-003-segregacao-estados-terraform.md) — Segregação de estados do Terraform
+- [ADR-004](adr/ADR-004-saga-orquestrada.md) — Saga orquestrada para o fluxo da OS
+- [ADR-005](adr/ADR-005-mensageria-sns-sqs.md) — Mensageria assíncrona com SNS + SQS
+- [ADR-006](adr/ADR-006-bancos-por-servico.md) — Banco por serviço (PostgreSQL + DynamoDB)
 
 ### RFCs — Decisões técnicas relevantes
 - [RFC-001](rfc/RFC-001-escolha-da-nuvem.md) — Escolha do provedor de nuvem
@@ -26,7 +29,7 @@ com API Gateway, autenticação serverless, Kubernetes escalável e observabilid
 
 | # | Repositório | Conteúdo neste workspace |
 |---|---|---|
-| 1 | `auto-repair-shop-api` | `src/`, `Dockerfile`, `.github/workflows/ci-cd.yml` |
+| 1 | `auto-repair-os-service` (antigo `auto-repair-shop-api`) | `src/`, `Dockerfile`, `.github/workflows/ci-cd.yml` |
 | 2 | `auto-repair-auth-lambda` | `lambda-auth/` |
 | 3 | `auto-repair-infra-k8s` | `terraform/k8s/`, `k8s/`, `.github/workflows/infra-k8s.yml` |
 | 4 | `auto-repair-infra-db` | `terraform/db/`, `.github/workflows/infra-db.yml` |

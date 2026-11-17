@@ -1,5 +1,5 @@
 {
-  "name": "auto-repair-shop-api",
+  "name": "auto-repair-os-service",
   "version": "0.0.1",
   "description": "",
   "author": "",
@@ -16,6 +16,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "test:bdd": "jest --testPathPatterns bdd",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
@@ -27,6 +28,8 @@
     "sonar": "sonar-scanner"
   },
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.1169.0",
+    "@aws-sdk/client-sqs": "^3.1169.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -67,6 +70,7 @@
     "eslint-plugin-prettier": "^5.2.2",
     "globals": "^17.0.0",
     "jest": "^30.0.0",
+    "jest-cucumber": "^4.5.0",
     "prettier": "^3.4.2",
     "sonarqube-scanner": "^4.3.6",
     "source-map-support": "^0.5.21",
@@ -103,6 +107,14 @@
       "!tracing.ts"
     ],
     "coverageDirectory": "../coverage",
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    },
     "testEnvironment": "node"
   }
 }

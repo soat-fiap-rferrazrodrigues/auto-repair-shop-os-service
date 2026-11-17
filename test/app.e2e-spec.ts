@@ -476,7 +476,7 @@ describe('Orders – full lifecycle (e2e)', () => {
     expect(res.body).toHaveProperty('status');
   });
 
-  it('POST /orders/:id/approve-budget – status → IN_EXECUTION + stock decremented', async () => {
+  it('POST /orders/:id/approve-budget – status → AWAITING_PAYMENT, stock untouched', async () => {
     const stockBefore = (
       await request(app.getHttpServer())
         .get(`/parts/${partId}`)
@@ -488,7 +488,7 @@ describe('Orders – full lifecycle (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(201);
 
-    expect(res.body.status).toBe('IN_EXECUTION');
+    expect(res.body.status).toBe('AWAITING_PAYMENT');
 
     const stockAfter = (
       await request(app.getHttpServer())
@@ -496,7 +496,18 @@ describe('Orders – full lifecycle (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
     ).body.stockQuantity as number;
 
-    expect(stockAfter).toBe(stockBefore - 2);
+    // Stock is reserved by execution-service after PaymentConfirmed.
+    expect(stockAfter).toBe(stockBefore);
+  });
+
+  it('PATCH /orders/:id/status – simulates PaymentConfirmed → IN_EXECUTION', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/orders/${orderId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'IN_EXECUTION' })
+      .expect(200);
+
+    expect(res.body.status).toBe('IN_EXECUTION');
   });
 
   it('POST /orders/:id/finish – status → FINISHED', async () => {

@@ -6,27 +6,33 @@ import {
 import { ServiceOrder } from '../entities/service-order.entity';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { OrderStatus } from '../enums/order-status.enum';
-import { PartsService } from '../../parts/parts.service';
 import { OrdersRepository } from '../repositories/orders.repository';
 
-const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
-  [OrderStatus.RECEIVED]: [OrderStatus.IN_DIAGNOSIS],
-  [OrderStatus.IN_DIAGNOSIS]: [OrderStatus.AWAITING_APPROVAL],
-  [OrderStatus.AWAITING_APPROVAL]: [
-    OrderStatus.IN_EXECUTION,
-    OrderStatus.RECEIVED,
+export const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
+  [OrderStatus.RECEIVED]: [OrderStatus.IN_DIAGNOSIS, OrderStatus.CANCELLED],
+  [OrderStatus.IN_DIAGNOSIS]: [
+    OrderStatus.AWAITING_APPROVAL,
+    OrderStatus.CANCELLED,
   ],
-  [OrderStatus.IN_EXECUTION]: [OrderStatus.FINISHED],
+  // Approval always goes through payment (saga); no direct jump to IN_EXECUTION.
+  [OrderStatus.AWAITING_APPROVAL]: [
+    OrderStatus.AWAITING_PAYMENT,
+    OrderStatus.RECEIVED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.AWAITING_PAYMENT]: [
+    OrderStatus.IN_EXECUTION,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.IN_EXECUTION]: [OrderStatus.FINISHED, OrderStatus.CANCELLED],
   [OrderStatus.FINISHED]: [OrderStatus.DELIVERED],
   [OrderStatus.DELIVERED]: [],
+  [OrderStatus.CANCELLED]: [],
 };
 
 @Injectable()
 export class UpdateOrderStatusUseCase {
-  constructor(
-    private readonly ordersRepository: OrdersRepository,
-    private readonly partsService: PartsService,
-  ) {}
+  constructor(private readonly ordersRepository: OrdersRepository) {}
 
   async execute(id: string, dto: UpdateOrderStatusDto): Promise<ServiceOrder> {
     const order = await this.ordersRepository.findById(id);
@@ -46,11 +52,7 @@ export class UpdateOrderStatusUseCase {
       case OrderStatus.IN_EXECUTION:
         order.approvedAt = now;
         order.startedAt = now;
-        if (order.parts) {
-          for (const item of order.parts) {
-            await this.partsService.decreaseStock(item?.partId, item?.quantity);
-          }
-        }
+        // Stock is reserved by execution-service (ReserveAndEnqueue, ADR-006).
         break;
       case OrderStatus.FINISHED:
         order.finishedAt = now;

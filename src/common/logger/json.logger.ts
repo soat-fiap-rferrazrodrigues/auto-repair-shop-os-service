@@ -1,4 +1,8 @@
 import { ConsoleLogger } from '@nestjs/common';
+import { currentCorrelationId } from './correlation-context';
+
+// Fallback: ids already present in log text (orderId=..., correlation_id=...).
+const INLINE_ID = /(?:orderId|correlation_id)=([0-9a-f-]{36})/i;
 
 interface StructuredLogRecord {
   timestamp: string;
@@ -18,7 +22,7 @@ interface StructuredLogRecord {
  * payload natively and correlate entries with APM traces.
  */
 export class JsonLogger extends ConsoleLogger {
-  private readonly service = process.env.DD_SERVICE ?? 'auto-repair-shop-api';
+  private readonly service = process.env.DD_SERVICE ?? 'os-service';
   private readonly env = process.env.DD_ENV ?? process.env.NODE_ENV ?? 'local';
 
   log(message: unknown, context?: string): void {
@@ -56,7 +60,8 @@ export class JsonLogger extends ConsoleLogger {
       context: context ?? this.context,
     };
 
-    const correlationId = JsonLogger.currentCorrelationId;
+    const correlationId =
+      currentCorrelationId() ?? INLINE_ID.exec(record.message)?.[1];
     if (correlationId) record.correlation_id = correlationId;
     if (stack) record.stack = stack;
 
@@ -73,10 +78,4 @@ export class JsonLogger extends ConsoleLogger {
       return String(message);
     }
   }
-
-  /**
-   * Set per request by the correlation middleware, allowing log entries emitted
-   * deep in the call stack to carry the originating request id.
-   */
-  static currentCorrelationId: string | undefined;
 }

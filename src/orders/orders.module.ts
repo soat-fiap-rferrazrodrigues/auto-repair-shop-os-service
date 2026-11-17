@@ -15,6 +15,11 @@ import {
   ListOrdersUseCase,
   TrackOrderUseCase,
 } from './use-cases';
+import { OrderSagaOrchestrator } from './saga/order-saga.orchestrator';
+import {
+  messagePublisherProvider,
+  sagaConsumerProvider,
+} from './saga/saga.providers';
 
 @Module({
   imports: [
@@ -26,12 +31,15 @@ import {
   controllers: [OrdersController],
   providers: [
     OrdersService,
+    OrderSagaOrchestrator,
+    messagePublisherProvider,
+    sagaConsumerProvider,
     OrdersRepository,
     CreateOrderUseCase,
     UpdateOrderStatusUseCase,
     ListOrdersUseCase,
     TrackOrderUseCase,
   ],
-  exports: [OrdersService, OrdersRepository],
+  exports: [OrdersService, OrdersRepository, OrderSagaOrchestrator],
 })
 export class OrdersModule {}

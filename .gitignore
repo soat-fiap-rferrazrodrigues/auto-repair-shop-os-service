@@ -63,3 +63,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Output of scripts/split-repos.sh (regenerable copies of the four repositories)
 repos/
+
+microservices/*/node_modules
+microservices/*/dist
+microservices/*/coverage

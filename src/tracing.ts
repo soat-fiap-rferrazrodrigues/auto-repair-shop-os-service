@@ -16,7 +16,7 @@ export function initTracing(): void {
     };
 
     tracer.init({
-      service: process.env.DD_SERVICE ?? 'auto-repair-shop-api',
+      service: process.env.DD_SERVICE ?? 'os-service',
       env: process.env.DD_ENV ?? process.env.NODE_ENV ?? 'local',
       version: process.env.DD_VERSION ?? '1.0.0',
       // Injects dd.trace_id / dd.span_id into logs for trace-log correlation.

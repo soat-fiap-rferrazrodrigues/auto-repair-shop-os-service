@@ -19,7 +19,7 @@ credenciais com poder para destruir o banco de dados.
 
 | # | Repositório | Conteúdo | Gatilho de deploy |
 |---|---|---|---|
-| 1 | `auto-repair-shop-api` | NestJS, Dockerfile, testes | Build de imagem + rollout |
+| 1 | `auto-repair-os-service` (antigo `auto-repair-shop-api`) | NestJS, Dockerfile, testes | Build de imagem + rollout |
 | 2 | `auto-repair-auth-lambda` | Função CPF→JWT, API Gateway | Empacota e aplica Terraform |
 | 3 | `auto-repair-infra-k8s` | Terraform VPC/EKS + manifests | Aplica cluster e manifests |
 | 4 | `auto-repair-infra-db` | Terraform RDS + Secrets Manager | Aplica banco |

@@ -12,6 +12,7 @@ import {
   ListOrdersUseCase,
   TrackOrderUseCase,
 } from './use-cases';
+import { OrderSagaOrchestrator } from './saga/order-saga.orchestrator';
 
 @Injectable()
 export class OrdersService {
@@ -23,6 +24,7 @@ export class OrdersService {
     private readonly updateOrderStatusUseCase: UpdateOrderStatusUseCase,
     private readonly listOrdersUseCase: ListOrdersUseCase,
     private readonly trackOrderUseCase: TrackOrderUseCase,
+    private readonly saga: OrderSagaOrchestrator,
   ) {}
 
   async create(dto: CreateOrderDto): Promise<ServiceOrder> {
@@ -50,16 +52,53 @@ export class OrdersService {
     return this.updateStatus(id, { status: OrderStatus.IN_DIAGNOSIS });
   }
 
-  sendBudget(id: string): Promise<ServiceOrder> {
-    return this.updateStatus(id, { status: OrderStatus.AWAITING_APPROVAL });
+  /**
+   * Diagnosis finished: the order awaits approval and the saga asks billing
+   * for the formal budget. A later `BudgetGenerated` is an idempotent no-op.
+   * Broker failures are logged, not propagated (no outbox yet).
+   */
+  async sendBudget(id: string): Promise<ServiceOrder> {
+    const order = await this.updateStatus(id, {
+      status: OrderStatus.AWAITING_APPROVAL,
+    });
+    try {
+      await this.saga.start(id, {
+        total: Number(order.totalPrice),
+        items: [
+          ...(order.services ?? []).map((s) => ({
+            kind: 'SERVICE' as const,
+            referenceId: s.serviceId,
+            quantity: 1,
+            unitPrice: Number(s.price),
+          })),
+          ...(order.parts ?? []).map((p) => ({
+            kind: 'PART' as const,
+            referenceId: p.partId,
+            quantity: p.quantity,
+            unitPrice: Number(p.unitPrice),
+          })),
+        ],
+      });
+    } catch (err) {
+      this.logger.error(
+        `saga start failed orderId=${id}: ${(err as Error).message}`,
+      );
+    }
+    return order;
   }
 
-  approveBudget(id: string): Promise<ServiceOrder> {
-    return this.updateStatus(id, { status: OrderStatus.IN_EXECUTION });
+  /** Approval → AWAITING_PAYMENT + billing.CreatePayment (saga). */
+  async approveBudget(id: string): Promise<ServiceOrder> {
+    await this.findOne(id);
+    await this.saga.handle({ type: 'BudgetApproved', orderId: id });
+    return this.findOne(id);
   }
 
-  rejectBudget(id: string): Promise<ServiceOrder> {
-    return this.updateStatus(id, { status: OrderStatus.RECEIVED });
+  /** Rejection → compensation back to RECEIVED (saga). */
+  async rejectBudget(id: string): Promise<ServiceOrder> {
+    await this.findOne(id);
+    await this.saga.handle({ type: 'BudgetRejected', orderId: id });
+    return this.findOne(id);
   }
 
   finishExecution(id: string): Promise<ServiceOrder> {
@@ -95,10 +134,13 @@ export class OrdersService {
       return order;
     }
 
-    if (dto.action === EmailAction.APPROVE) {
-      return this.approveBudget(dto.orderId);
-    } else {
-      return this.rejectBudget(dto.orderId);
-    }
+    // Approval → AWAITING_PAYMENT + billing.CreatePayment;
+    // rejection → compensation back to RECEIVED.
+    await this.saga.handle(
+      dto.action === EmailAction.APPROVE
+        ? { type: 'BudgetApproved', orderId: dto.orderId }
+        : { type: 'BudgetRejected', orderId: dto.orderId },
+    );
+    return this.findOne(dto.orderId);
   }
 }
