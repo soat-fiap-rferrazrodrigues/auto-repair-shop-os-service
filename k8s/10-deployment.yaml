@@ -1,0 +1,95 @@
+# os-service Deployment + HPA. Kept as `auto-repair-api` so the existing
+# Service/LoadBalancer and API Gateway integration keep working.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auto-repair-api
+  labels:
+    app: auto-repair-api
+    tags.datadoghq.com/service: os-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auto-repair-api
+  template:
+    metadata:
+      labels:
+        app: auto-repair-api
+        tags.datadoghq.com/service: os-service
+      annotations:
+        # Tells the Datadog agent to parse these container logs as JSON.
+        ad.datadoghq.com/api.logs: '[{"source":"nodejs","service":"os-service"}]'
+    spec:
+      serviceAccountName: os-service
+      terminationGracePeriodSeconds: 30 # finishes the current SQS long poll
+      containers:
+        - name: api
+          image: ${IMAGE}
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: api-config
+            - configMapRef:
+                name: os-service-saga
+            # Populated by External Secrets (infra-k8s/k8s/external-secrets.yaml).
+            - secretRef:
+                name: api-secrets
+          env:
+            # Send APM traces to the Datadog agent running on the same node.
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_TRACE_ENABLED
+              value: 'true'
+            - name: DD_SERVICE
+              value: os-service
+            - name: DD_ENV
+              value: ${ENV}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auto-repair-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auto-repair-api
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

@@ -1,0 +1,59 @@
+---
+# billing-service — PostgreSQL próprio + Mercado Pago.
+# Role ARN: output `service_role_arns["billing-service"]` (stack messaging).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: billing-service
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/auto-repair-${ENV}-billing-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-service-config
+data:
+  PORT: "3001"
+  DD_SERVICE: billing-service
+  DD_ENV: ${ENV}
+  AWS_REGION: us-east-1
+  MP_API_URL: https://api.mercadopago.com
+  MP_NOTIFICATION_URL: https://${API_HOST}/billing/payments/webhook
+  # output service_env["billing-service"] (stack messaging)
+  BILLING_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:${ACCOUNT_ID}:auto-repair-${ENV}-billing-events
+  BILLING_SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/${ACCOUNT_ID}/auto-repair-${ENV}-billing-commands
+---
+# DB + Mercado Pago credentials come from AWS Secrets Manager.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: billing-service-secrets
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: SecretStore # namespaced store from infra-k8s/k8s/external-secrets.yaml
+  target:
+    name: billing-service-secrets
+  data:
+    # Same HS256 secret the os-service already reads (ADR-001).
+    - secretKey: JWT_SECRET
+      remoteRef:
+        key: auto-repair-${ENV}/api
+        property: JWT_SECRET
+  dataFrom:
+    - extract:
+        key: auto-repair-${ENV}/billing-service/database
+    - extract:
+        key: auto-repair-${ENV}/billing-service/mercadopago # MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-service
+spec:
+  selector:
+    app: billing-service
+  ports:
+    - port: 80
+      targetPort: 3001

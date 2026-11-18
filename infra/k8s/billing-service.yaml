@@ -1,0 +1,127 @@
+# billing-service — PostgreSQL próprio + Mercado Pago.
+# Role ARN: output `service_role_arns["billing-service"]` (stack messaging).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: billing-service
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/auto-repair-ENV-billing-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-service-config
+data:
+  PORT: "3001"
+  DD_SERVICE: billing-service
+  DD_ENV: ENV
+  AWS_REGION: us-east-1
+  MP_API_URL: https://api.mercadopago.com
+  MP_NOTIFICATION_URL: https://API_HOST/billing/payments/webhook
+  # output service_env["billing-service"] (stack messaging)
+  BILLING_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:ACCOUNT_ID:auto-repair-ENV-billing-events
+  BILLING_SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/auto-repair-ENV-billing-commands
+---
+# DB + Mercado Pago credentials come from AWS Secrets Manager.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: billing-service-secrets
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: SecretStore # namespaced store from infra-k8s/k8s/external-secrets.yaml
+  target:
+    name: billing-service-secrets
+  data:
+    # Same HS256 secret the os-service already reads (ADR-001).
+    - secretKey: JWT_SECRET
+      remoteRef:
+        key: auto-repair-ENV/api
+        property: JWT_SECRET
+  dataFrom:
+    - extract:
+        key: auto-repair-ENV/billing-service/database
+    - extract:
+        key: auto-repair-ENV/billing-service/mercadopago # MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-service
+  labels:
+    app: billing-service
+    tags.datadoghq.com/service: billing-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: billing-service
+  template:
+    metadata:
+      labels:
+        app: billing-service
+        tags.datadoghq.com/service: billing-service
+    spec:
+      serviceAccountName: billing-service
+      terminationGracePeriodSeconds: 30 # finishes the current SQS long poll
+      containers:
+        - name: billing
+          image: ghcr.io/soat-fiap-rferrazrodrigues/auto-repair-billing-service:main
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: billing-service-config
+            - secretRef:
+                name: billing-service-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-service
+spec:
+  selector:
+    app: billing-service
+  ports:
+    - port: 80
+      targetPort: 3001
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: billing-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: billing-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

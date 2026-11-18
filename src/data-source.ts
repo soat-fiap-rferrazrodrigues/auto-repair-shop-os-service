@@ -3,6 +3,10 @@ import { DataSource } from 'typeorm';
 
 config();
 
+// `.ts` via ts-node in development, compiled `.js` in the production image
+// (avoids loading the emitted `.d.ts` files).
+const ext = __filename.endsWith('.ts') ? 'ts' : 'js';
+
 /**
  * DataSource used exclusively by the TypeORM CLI (generate/run/revert).
  * The runtime connection is configured in AppModule.
@@ -18,8 +22,8 @@ export default new DataSource({
     process.env.DATABASE_SSL === 'true'
       ? { rejectUnauthorized: false }
       : undefined,
-  entities: [`${__dirname}/**/*.entity{.ts,.js}`],
-  migrations: [`${__dirname}/migrations/*{.ts,.js}`],
+  entities: [`${__dirname}/**/*.entity.${ext}`],
+  migrations: [`${__dirname}/migrations/*.${ext}`],
   // Never let the CLI mutate the schema implicitly.
   synchronize: false,
 });

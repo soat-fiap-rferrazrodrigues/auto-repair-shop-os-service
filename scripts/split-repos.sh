@@ -76,6 +76,10 @@ copy \
   "$ROOT/README.md" \
   "$API/"
 copy_if "$ROOT/.env.example" "$API/"
+copy_if "$ROOT/k8s" "$API/"
+mkdir -p "$API/scripts" "$API/docs"
+copy_if "$ROOT/scripts/coverage-summary.js" "$API/scripts/"
+copy_if "$ROOT/docs/postman" "$API/docs/"
 mkdir -p "$API/.github/workflows"
 copy_if "$ROOT/.github/workflows/ci-cd.yml" "$API/.github/workflows/"
 

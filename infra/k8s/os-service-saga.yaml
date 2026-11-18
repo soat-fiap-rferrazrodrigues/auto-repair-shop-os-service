@@ -1,0 +1,24 @@
+# Additions to the existing os-service (auto-repair-api) manifests.
+# Apply on top of the Deployment in auto-repair-infra-k8s:
+#   1. kubectl apply -f os-service-saga.yaml
+#   2. kubectl patch deployment auto-repair-api \
+#        -p '{"spec":{"template":{"spec":{"serviceAccountName":"os-service"}}}}'
+#   3. kubectl set env deployment/auto-repair-api --from=configmap/os-service-saga
+#
+# The IAM role trusts system:serviceaccount:<ns>:os-service (stack messaging).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: os-service
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/auto-repair-ENV-os-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: os-service-saga
+data:
+  AWS_REGION: us-east-1
+  # output service_env["os-service"] (stack messaging)
+  SAGA_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:ACCOUNT_ID:auto-repair-ENV-os-commands
+  SAGA_SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/auto-repair-ENV-os-saga-events

@@ -1,0 +1,54 @@
+# os-service — configuration applied by this repository's CI before rollout.
+# Placeholders filled by envsubst in .github/workflows/ci-cd.yml:
+#   ${ACCOUNT_ID} ${ENV} ${DATABASE_HOST} ${IMAGE}
+# Shared cluster objects (SecretStore, ExternalSecret `api-secrets` with
+# DATABASE_PASSWORD/JWT_SECRET, Datadog agent) stay in auto-repair-infra-k8s.
+---
+# IRSA: role created by infra-k8s/terraform/messaging (publish os-commands,
+# consume os-saga-events).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: os-service
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/auto-repair-${ENV}-os-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  DATABASE_HOST: ${DATABASE_HOST} # output db_host of infra-db/terraform/db
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: auto_repair
+  DATABASE_USER: postgres
+  DATABASE_SSL: "true"
+  PORT: "3000"
+  ENVIRONMENT: ${ENV}
+  NODE_ENV: production
+---
+# Saga messaging (ADR-004/005). Without these the service falls back to a
+# logging publisher and no consumer.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: os-service-saga
+data:
+  AWS_REGION: us-east-1
+  SAGA_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:${ACCOUNT_ID}:auto-repair-${ENV}-os-commands
+  SAGA_SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/${ACCOUNT_ID}/auto-repair-${ENV}-os-saga-events
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auto-repair-api
+  labels:
+    app: auto-repair-api
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+  selector:
+    app: auto-repair-api

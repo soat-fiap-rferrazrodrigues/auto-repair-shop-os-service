@@ -1,4 +1,4 @@
-name: CI/CD - Application
+name: CI/CD - OS Service
 
 on:
   push:
@@ -15,11 +15,12 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   AWS_REGION: us-east-1
+  DEPLOYMENT: auto-repair-api
 
 jobs:
-  # ── Quality gate: runs on every PR and blocks the merge ────────────────────
+  # ── Quality gate: required check on the protected main branch ─────────────
   build-and-test:
-    name: Build & Test
+    name: Build, Test & Quality
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -32,8 +33,17 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 10s
           --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: auto_repair_test
+      JWT_SECRET: test-secret
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Sonar needs full history for new-code detection
 
       - uses: actions/setup-node@v4
         with:
@@ -44,30 +54,27 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
-      - name: Unit tests with coverage
+      - name: Unit + BDD tests (fails below 80% coverage)
         run: npm run test:cov
-        env:
-          DATABASE_HOST: localhost
-          DATABASE_PORT: 5432
-          DATABASE_USER: postgres
-          DATABASE_PASSWORD: postgres
-          DATABASE_NAME: auto_repair_test
-          JWT_SECRET: test-secret
+
+      - name: Coverage evidence (job summary)
+        if: always()
+        run: node scripts/coverage-summary.js >> "$GITHUB_STEP_SUMMARY"
 
       - name: E2E tests
         run: npm run test:e2e
-        env:
-          DATABASE_HOST: localhost
-          DATABASE_PORT: 5432
-          DATABASE_USER: postgres
-          DATABASE_PASSWORD: postgres
-          DATABASE_NAME: auto_repair_test
-          JWT_SECRET: test-secret
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: coverage
+          name: coverage-report
           path: coverage/
+
+      - name: SonarQube scan + quality gate
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   # ── Image build: only after the quality gate, only on protected branches ───
   docker:
@@ -101,13 +108,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Homolog: automatic on every merge into the homolog branch ─────────────
-  deploy-homolog:
-    name: Deploy to Homolog
+  # ── Deploy: homolog automatic, production gated by manual approval ────────
+  deploy:
+    name: Deploy (${{ github.ref_name }})
     needs: docker
-    if: github.ref == 'refs/heads/homolog'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: homolog
+    environment: ${{ github.ref_name == 'main' && 'production' || 'homolog' }}
+    env:
+      CLUSTER: ${{ github.ref_name == 'main' && 'auto-repair-prod' || 'auto-repair-homolog' }}
+      ENV: ${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
+      DATABASE_HOST: ${{ vars.DATABASE_HOST }}
+      IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -117,55 +129,27 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name auto-repair-homolog --region $AWS_REGION
+        run: aws eks update-kubeconfig --name $CLUSTER --region $AWS_REGION
+
+      # Manifests live in k8s/; ${ACCOUNT_ID} ${ENV} ${DATABASE_HOST} ${IMAGE} are filled here.
+      - name: Apply config (ServiceAccount, ConfigMaps, Service)
+        run: |
+          export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          envsubst '${ACCOUNT_ID} ${ENV} ${DATABASE_HOST} ${IMAGE}' < k8s/00-config.yaml | kubectl apply -f -
 
       - name: Run database migrations
         run: |
-          kubectl delete job db-migrate --ignore-not-found
-          kubectl create job db-migrate \
-            --image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }} \
-            -- npm run migration:run
-          kubectl wait --for=condition=complete job/db-migrate --timeout=300s
+          kubectl delete pod os-migrate --ignore-not-found
+          kubectl run os-migrate --image=$IMAGE --restart=Never --rm -i \
+            --overrides='{"spec":{"containers":[{"name":"os-migrate","image":"'"$IMAGE"'","command":["npm","run","migration:run:prod"],"envFrom":[{"configMapRef":{"name":"api-config"}},{"secretRef":{"name":"api-secrets"}}]}]}}'
 
-      - name: Roll out new image
+      - name: Roll out (Deployment + HPA)
         run: |
-          kubectl set image deployment/auto-repair-api \
-            api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-          kubectl rollout status deployment/auto-repair-api --timeout=180s
+          export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          envsubst '${ACCOUNT_ID} ${ENV} ${DATABASE_HOST} ${IMAGE}' < k8s/10-deployment.yaml | kubectl apply -f -
+          kubectl rollout status deployment/$DEPLOYMENT --timeout=180s
 
       - name: Smoke test
         run: |
-          kubectl run smoke --rm -i --restart=Never --image=curlimages/curl -- \
+          kubectl run os-smoke --rm -i --restart=Never --image=curlimages/curl -- \
             curl -fsS http://auto-repair-api/health
-
-  # ── Production: gated by a manual reviewer on the GitHub Environment ──────
-  deploy-prod:
-    name: Deploy to Production
-    needs: docker
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name auto-repair-prod --region $AWS_REGION
-
-      - name: Run database migrations
-        run: |
-          kubectl delete job db-migrate --ignore-not-found
-          kubectl create job db-migrate \
-            --image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }} \
-            -- npm run migration:run
-          kubectl wait --for=condition=complete job/db-migrate --timeout=300s
-
-      - name: Roll out new image
-        run: |
-          kubectl set image deployment/auto-repair-api \
-            api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-          kubectl rollout status deployment/auto-repair-api --timeout=180s
